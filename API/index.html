@@ -37,13 +37,12 @@
         body: JSON.stringify({
           username,
           email,
-          password,
+          password, // Envía la contraseña en texto claro
         }),
       });
 
       if (response.ok) {
         alert('Usuario registrado con éxito');
-       
       } else {
         const data = await response.json();
         alert(`Error al registrar el usuario: ${data.message}`);
@@ -52,7 +51,3 @@
   </script>
 </body>
 </html>
-
-<ion-content>
-  <div class="container"
-</ion-content>

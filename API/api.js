@@ -1,38 +1,23 @@
 const express = require('express');
 const mongoose = require('mongoose');
-const user = require('./user.controller');
-const Users = require('./User');
+const cors = require('cors');
+const User = require('./models/User');
 const app = express();
 const port = 3000;
-const cors = require('cors');
-const jwt = require('jsonwebtoken');
-const { expressjwt: jwtt } = require("express-jwt");
-
-jwtt({
-  secret: "secreto",
-  audience: "http://myapi/protected",
-  issuer: "http://issuer",
-  algorithms: ["HS256"],
-});
-
-const secretKey = 'secreto'; 
-
+require('dotenv').config({ path: './env/config.env' });
+const jwtMiddleware = require('./middlewares/jwtMiddleware'); // Importa el middleware JWT
+const bcrypt = require('bcrypt'); 
 app.use(cors());
 
-mongoose.connect('mongodb+srv://vichofarias:vichofariasJalvarez2001@cluster0.cxhsze4.mongodb.net/miapp?retryWrites=true&w=majority', {
+mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
 
 app.use(express.json());
 
-// Middleware JWT
-app.use(
-  jwtt({
-    secret: secretKey,
-    algorithms: ['HS256'],
-  }).unless({ path: ['/login', '/','/users'] })  // Agrega '/' aquí para permitir acceso público a la raíz
-);
+// Middleware JWT para autenticación
+app.use(jwtMiddleware);
 
 // Manejador de errores para tokens no válidos
 app.use((err, req, res, next) => {
@@ -42,12 +27,53 @@ app.use((err, req, res, next) => {
   next();
 });
 
-app.get('/users', user.list);
-app.post('/users', user.create);
-app.get('/users/:id', user.get);
-app.put('/users/:id', user.update);
-app.patch('/users/:id', user.update);
-app.delete('/users/:id', user.destroy);
+// Rutas para interactuar con usuarios
+app.get('/users', async (req, res) => {
+  try {
+    const users = await User.find();
+    res.status(200).json(users);
+  } catch (error) {
+    res.status(500).json({ error: 'Error al obtener los usuarios' });
+  }
+});
+
+app.get('/users/:id', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id);
+    if (!user) {
+      return res.status(404).json({ error: 'Usuario no encontrado' });
+    }
+    res.status(200).json(user);
+  } catch (error) {
+    res.status(500).json({ error: 'Error al obtener el usuario' });
+  }
+});
+
+app.post('/users', async (req, res) => {
+  const { username, email, password } = req.body; // Obtiene los datos del usuario
+
+  // Hashea la contraseña antes de guardarla
+  bcrypt.hash(password, 10, async (err, hash) => {
+    if (err) {
+      return res.status(500).json({ error: 'Error al hashear la contraseña' });
+    }
+
+    try {
+      // Crea un nuevo usuario con la contraseña hasheada
+      const newUser = new User({
+        username,
+        email,
+        password: hash, // Almacena el hash en lugar del texto claro
+      });
+
+      // Guarda el usuario en la base de datos
+      const savedUser = await newUser.save();
+      res.status(201).json(savedUser);
+    } catch (error) {
+      return res.status(500).json({ error: 'Error al registrar el usuario' });
+    }
+  });
+});
 
 app.use(express.static('app'));
 
@@ -64,17 +90,17 @@ app.post('/login', async (req, res) => {
   const { username, password } = req.body;
 
   try {
-    const user = await Users.findOne({ username }); // Buscar el usuario por nombre de usuario
+    const user = await User.findOne({ username });
 
     if (!user) {
       return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
 
-    // Comparar la contraseña proporcionada con la contraseña almacenada (sin hash)
-    if (password === user.password) {
-      // Autenticación exitosa: crear un token JWT
-      const token = jwt.sign({ username }, secretKey);
-      res.status(200).json({ token });
+    const passwordMatch = await bcrypt.compare(password, user.password);
+    if (passwordMatch) {
+      // No necesitas volver a firmar el token aquí, ya que ya se hizo en el middleware.
+      // Solo devuelve el token anterior.
+      res.status(200).json({ token: req.user });
     } else {
       return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
