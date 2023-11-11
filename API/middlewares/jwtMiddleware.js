@@ -1,7 +1,6 @@
 const jwt = require('jsonwebtoken');
 const { expressjwt: jwtt } = require("express-jwt");
-
-const secretKey = 'secreto';
+const secretKey = process.env.JWT_SECRET || 'secreto';
 
 jwtt({
   secret: secretKey,
@@ -13,6 +12,6 @@ jwtt({
 const jwtMiddleware = jwtt({
   secret: secretKey,
   algorithms: ['HS256'],
-}).unless({ path: ['/login', '/', '/users'] });
+}).unless({ path: ['/login', '/', '/users','/user-data'] });
 
 module.exports = jwtMiddleware;

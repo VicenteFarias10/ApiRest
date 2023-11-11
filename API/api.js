@@ -5,9 +5,12 @@ const User = require('./models/User');
 const app = express();
 const port = 3000;
 require('dotenv').config({ path: './env/config.env' });
-const jwtMiddleware = require('./middlewares/jwtMiddleware'); // Importa el middleware JWT
+const jwtMiddleware = require('./middlewares/jwtMiddleware'); 
 const bcrypt = require('bcrypt'); 
 app.use(cors());
+const jwt = require('jsonwebtoken');
+
+
 
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
@@ -16,10 +19,10 @@ mongoose.connect(process.env.MONGODB_URI, {
 
 app.use(express.json());
 
-// Middleware JWT para autenticación
+// middleware JWT para autenticación
 app.use(jwtMiddleware);
 
-// Manejador de errores para tokens no válidos
+// Manejar errores de tokens invalidos
 app.use((err, req, res, next) => {
   if (err.name === 'UnauthorizedError') {
     res.status(401).json({ error: 'Token no válido' });
@@ -27,7 +30,7 @@ app.use((err, req, res, next) => {
   next();
 });
 
-// Rutas para interactuar con usuarios
+// Ruta de user
 app.get('/users', async (req, res) => {
   try {
     const users = await User.find();
@@ -50,7 +53,12 @@ app.get('/users/:id', async (req, res) => {
 });
 
 app.post('/users', async (req, res) => {
-  const { username, email, password } = req.body; // Obtiene los datos del usuario
+  const { username, email, password,sede, role, patente, } = req.body; // Agrega "sede" a la destructuración
+
+  // Validar que el campo "rol" sea válido (conductor o pasajero)
+  if (role !== 'conductor' && role !== 'pasajero') {
+    return res.status(400).json({ error: 'Rol inválido' });
+  }
 
   // Hashea la contraseña antes de guardarla
   bcrypt.hash(password, 10, async (err, hash) => {
@@ -59,12 +67,20 @@ app.post('/users', async (req, res) => {
     }
 
     try {
-      // Crea un nuevo usuario con la contraseña hasheada
+      // Crea un usuario nuevo con el hash
       const newUser = new User({
         username,
         email,
-        password: hash, // Almacena el hash en lugar del texto claro
+        // Agrega "sede" al usuario
+        password: hash,
+        sede, 
+        role,
       });
+
+      // Añadir la patente solo si es un conductor
+      if (role === 'conductor') {
+        newUser.patente = patente;
+      }
 
       // Guarda el usuario en la base de datos
       const savedUser = await newUser.save();
@@ -98,9 +114,10 @@ app.post('/login', async (req, res) => {
 
     const passwordMatch = await bcrypt.compare(password, user.password);
     if (passwordMatch) {
-      // No necesitas volver a firmar el token aquí, ya que ya se hizo en el middleware.
-      // Solo devuelve el token anterior.
-      res.status(200).json({ token: req.user });
+      // Generar el token JWT utilizando la clave secreta de las variables de entorno
+      const token = jwt.sign({ username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '1h' });
+
+      res.status(200).json({ token }); // Responder con el token JWT
     } else {
       return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
