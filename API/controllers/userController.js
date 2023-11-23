@@ -1,4 +1,5 @@
 const Users = require('../models/User');
+
 const UserController = {
   get: async (req, res) => {
     const { id } = req.params;
@@ -39,7 +40,7 @@ const UserController = {
       console.error(error);
       res.status(500).json({ message: 'Error al eliminar el usuario' });
     }
-  },
+  
+  }
 }
-
 module.exports = UserController;

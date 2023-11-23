@@ -2,16 +2,15 @@ const express = require('express');
 const mongoose = require('mongoose');
 const cors = require('cors');
 const User = require('./models/User');
+const Viaje = require('./models/Viaje');
+const { getTransporter, enviarCorreoSolicitud } = require('./transporter');
 const app = express();
 const port = 3000;
 require('dotenv').config({ path: './env/config.env' });
-const jwtMiddleware = require('./middlewares/jwtMiddleware'); 
-const bcrypt = require('bcrypt'); 
-app.use(cors());
+const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-
-
-
+app.use(cors());
+// Conexión a la base de datos MongoDB
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -19,18 +18,43 @@ mongoose.connect(process.env.MONGODB_URI, {
 
 app.use(express.json());
 
-// middleware JWT para autenticación
-app.use(jwtMiddleware);
 
-// Manejar errores de tokens invalidos
+
+
+// Middleware JWT para autenticación
 app.use((err, req, res, next) => {
   if (err.name === 'UnauthorizedError') {
+    console.error('UnauthorizedError:', err.message);
     res.status(401).json({ error: 'Token no válido' });
+  } else if (err.name === 'Error') {
+    console.error('Error en la autenticación del usuario:', err.message);
+    res.status(401).json({ error: 'Error en la autenticación del usuario' });
+  } else {
+    // Si no es un error relacionado con la autorización, pasa al siguiente middleware
+    next();
   }
+});
+
+// Middleware para decodificar el token y configurar req.user
+app.use((req, res, next) => {
+  const token = req.headers.authorization?.split(' ')[1];
+
+  if (token) {
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      req.user = decoded;
+    } catch (err) {
+      // Aquí puedes manejar errores específicos relacionados con la decodificación del token
+      console.error('Error al decodificar el token:', err.message);
+      next({ name: 'Error', message: 'Error al decodificar el token' });
+    }
+  }
+
+  // Continúa con la ejecución del siguiente middleware
   next();
 });
 
-// Ruta de user
+// Rutas de usuario
 app.get('/users', async (req, res) => {
   try {
     const users = await User.find();
@@ -53,7 +77,7 @@ app.get('/users/:id', async (req, res) => {
 });
 
 app.post('/users', async (req, res) => {
-  const { username, email, password,sede, role, patente, } = req.body; // Agrega "sede" a la destructuración
+  const { username, email, password, sede, role, patente } = req.body;
 
   // Validar que el campo "rol" sea válido (conductor o pasajero)
   if (role !== 'conductor' && role !== 'pasajero') {
@@ -71,9 +95,8 @@ app.post('/users', async (req, res) => {
       const newUser = new User({
         username,
         email,
-        // Agrega "sede" al usuario
         password: hash,
-        sede, 
+        sede,
         role,
       });
 
@@ -90,18 +113,6 @@ app.post('/users', async (req, res) => {
     }
   });
 });
-
-app.use(express.static('app'));
-
-app.get('/', (req, res) => {
-  console.log(__dirname);
-  res.sendFile(__dirname + '/index.html');
-});
-
-app.get('*', (req, res) => {
-  res.status(404).send('Esta Página No Existe');
-});
-
 app.post('/login', async (req, res) => {
   const { username, password } = req.body;
 
@@ -114,10 +125,9 @@ app.post('/login', async (req, res) => {
 
     const passwordMatch = await bcrypt.compare(password, user.password);
     if (passwordMatch) {
-      // Generar el token JWT utilizando la clave secreta de las variables de entorno
       const token = jwt.sign({ username: user.username, role: user.role }, process.env.JWT_SECRET, { expiresIn: '1h' });
-
-      res.status(200).json({ token }); // Responder con el token JWT
+      req.user = { username: user.username, role: user.role };
+      res.status(200).json({ token });
     } else {
       return res.status(401).json({ error: 'Credenciales incorrectas' });
     }
@@ -127,6 +137,145 @@ app.post('/login', async (req, res) => {
   }
 });
 
+
+
+
+app.post('/viajes', async (req, res) => {
+  const { origen, destino, precio, asientosDisponibles } = req.body;
+
+  const conductorUsername = req.user.username;
+
+  if (!conductorUsername) {
+    return res.status(401).json({ error: 'Usuario no autenticado' });
+  }
+  // Validar el precio
+  if (precio < 1000 || precio > 10000) {
+    return res.status(400).json({ error: 'El precio debe estar entre 1000 y 10000' });
+  }
+  if (asientosDisponibles < 0 || asientosDisponibles > 9) {
+    return res.status(400).json({ error: 'La cantidad de asientos disponibles debe estar entre 0 y 9' });
+  }
+
+  try {
+    const conductor = await User.findOne({ username: conductorUsername });
+
+    if (!conductor) {
+      return res.status(400).json({ error: 'Conductor no encontrado' });
+    }
+
+    const nuevoViaje = new Viaje({
+      origen,
+      destino,
+      precio,
+      asientosDisponibles,
+      conductor: conductor._id,
+      pasajeros: [],
+    });
+
+    const viajeCreado = await nuevoViaje.save();
+
+    conductor.viajes = conductor.viajes || [];
+    conductor.viajes.push(viajeCreado);
+
+    await conductor.save();
+
+    res.status(201).json({ mensaje: 'Viaje creado exitosamente', viaje: viajeCreado });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error al crear el viaje' });
+  }
+});
+
+app.get('/viajes/:id', async (req, res) => {
+  try {
+    const viaje = await Viaje.findById(req.params.id).populate('conductor').populate('pasajeros');
+    if (!viaje) {
+      return res.status(404).json({ error: 'Viaje no encontrado' });
+    }
+    res.status(200).json({ viaje });
+  } catch (error) {
+    console.error('Error al obtener detalles del viaje:', error);
+    res.status(500).json({ error: 'Error al obtener detalles del viaje' });
+  }
+});
+
+// Ruta para obtener viajes disponibles
+app.get('/viajes-disponibles', async (req, res) => {
+  console.log('Recibida solicitud para /viajes-disponibles');
+  try {
+    const viajesDisponibles = await Viaje.find({ asientosDisponibles: { $gt: 0 } }).populate('conductor');
+    res.status(200).json({ viajes: viajesDisponibles });
+  } catch (error) {
+    console.error('Error al obtener los viajes disponibles:', error);
+    res.status(500).json({ error: 'Error al obtener los viajes disponibles' });
+  }
+});
+
+app.post('/solicitar-viaje', async (req, res) => {
+  const { viajeId, username } = req.body;
+
+  try {
+    const viaje = await Viaje.findById(viajeId);
+
+    if (!viaje) {
+      return res.status(404).json({ error: 'Viaje no encontrado' });
+    }
+
+    if (viaje.asientosDisponibles === 0) {
+      return res.status(400).json({ error: 'No hay asientos disponibles en este viaje' });
+    }
+
+    // Disminuir en 1 el número de asientos disponibles
+    viaje.asientosDisponibles--;
+
+    // Guarda el viaje actualizado en la base de datos
+    await viaje.save();
+
+    // Buscar al usuario por su nombre de usuario
+    const pasajero = await User.findOne({ username });
+
+    if (!pasajero) {
+      return res.status(404).json({ error: 'Pasajero no encontrado' });
+    }
+
+    // Obtener el conductor del viaje
+    const conductor = await User.findById(viaje.conductor);
+
+    if (!conductor) {
+      return res.status(404).json({ error: 'Conductor no encontrado' });
+    }
+
+    // Agregar el ID del pasajero al array de pasajeros en el viaje
+    viaje.pasajeros.push(pasajero._id);
+
+    // Guarda el viaje nuevamente para asegurarte de que los cambios se reflejen
+    await viaje.save();
+
+    // Ahora utiliza populate con una cadena después de haber guardado los cambios
+    const viajePopulado = await Viaje.findById(viaje._id).populate('conductor').populate('pasajeros');
+
+    const transporterPasajero = await getTransporter('pasajero');
+    const transporterConductor = await getTransporter('conductor');
+
+    // Envía el correo electrónico al pasajero y al conductor
+    await enviarCorreoSolicitud(transporterPasajero, viajePopulado, pasajero, conductor);
+    await enviarCorreoSolicitud(transporterConductor, viajePopulado, pasajero, conductor);
+
+    res.status(200).json({ mensaje: 'Solicitud de viaje exitosa', viaje: viajePopulado, username });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error al procesar la solicitud de viaje' });
+  }
+});
+
+app.get('/', (req, res) => {
+  console.log(__dirname);
+  res.sendFile(__dirname + '/index.html');
+});
+
+
+
+// Inicia el servidor
 app.listen(port, () => {
   console.log('Arrancando La Aplicación en el puerto ' + port);
 });
