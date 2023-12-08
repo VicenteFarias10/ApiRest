@@ -9,15 +9,16 @@ const port = 3000;
 require('dotenv').config({ path: './env/config.env' });
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
-app.use(cors());
-// Conexión a la base de datos MongoDB
+
+
+
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
 
 app.use(express.json());
-
+app.use(cors());
 
 
 
@@ -141,7 +142,7 @@ app.post('/login', async (req, res) => {
 
 
 app.post('/viajes', async (req, res) => {
-  const { origen, destino, precio, asientosDisponibles } = req.body;
+  const { origen, destino, precio, asientosDisponibles, horaInicio,diaInicio, } = req.body;
 
   const conductorUsername = req.user.username;
 
@@ -168,6 +169,8 @@ app.post('/viajes', async (req, res) => {
       destino,
       precio,
       asientosDisponibles,
+      horaInicio,
+      diaInicio,
       conductor: conductor._id,
       pasajeros: [],
     });
@@ -266,8 +269,52 @@ app.post('/solicitar-viaje', async (req, res) => {
     console.error(error);
     res.status(500).json({ error: 'Error al procesar la solicitud de viaje' });
   }
+})
+
+app.post('/viajes/:id/iniciar', async (req, res) => {
+  const viajeId = req.params.id;
+
+  try {
+    const viaje = await Viaje.findById(viajeId);
+
+    if (!viaje) {
+      return res.status(404).json({ error: 'Viaje no encontrado' });
+    }
+
+   
+    if (viaje.iniciado) {
+      return res.status(400).json({ error: 'El viaje ya ha sido iniciado' });
+    }
+
+    viaje.iniciado = true;
+    await viaje.save();
+
+    res.status(200).json({ mensaje: 'Viaje iniciado exitosamente' });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error al iniciar el viaje' });
+  }
 });
 
+// Ruta para finalizar un viaje
+app.post('/viajes/:id/finalizar', async (req, res) => {
+  const viajeId = req.params.id;
+
+  try {
+    const viaje = await Viaje.findById(viajeId);
+
+    if (!viaje) {
+      return res.status(404).json({ error: 'Viaje no encontrado' });
+    }
+    // Eliminar el viaje de la base de datos
+    await Viaje.findByIdAndDelete(viajeId);
+
+    res.status(200).json({ mensaje: 'Viaje finalizado exitosamente' });
+  } catch (error) {
+    console.error(error); // Agrega esta línea para imprimir el error en la consola
+    res.status(500).json({ error: 'Error al finalizar el viaje' });
+  }
+});
 app.get('/', (req, res) => {
   console.log(__dirname);
   res.sendFile(__dirname + '/index.html');
@@ -275,7 +322,6 @@ app.get('/', (req, res) => {
 
 
 
-// Inicia el servidor
 app.listen(port, () => {
   console.log('Arrancando La Aplicación en el puerto ' + port);
 });

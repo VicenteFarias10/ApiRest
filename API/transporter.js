@@ -14,7 +14,7 @@ const getTransporter = async (role) => {
         service: 'gmail',
         auth: {
           user: 'vicentefariasr1@gmail.com',
-          pass: 'rslbjkgghicsfxfg' // La contraseña de aplicación generada
+          pass: 'rslbjkgghicsfxfg' 
         }
       });
       

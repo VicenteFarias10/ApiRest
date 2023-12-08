@@ -9,7 +9,15 @@ const viajeSchema = new mongoose.Schema({
   conductor: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
   pasajeros: [{ type: mongoose.Schema.Types.ObjectId, ref: 'User' }],
   viajes: [{ type: mongoose.Schema.Types.ObjectId, ref: 'Viaje' }],
+  horaInicio: { type: String, required: true },
+  diaInicio: { type: String, required: true },
+  iniciado: {
+    type: Boolean,
+    default: false,
+  },
 });
+
+
 
 const Viaje = mongoose.model('Viaje', viajeSchema);
 
