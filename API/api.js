@@ -10,16 +10,47 @@ require('dotenv').config({ path: './env/config.env' });
 const bcrypt = require('bcrypt');
 const jwt = require('jsonwebtoken');
 
-
+const http = require('http');
+const socketIO = require('socket.io');
+const server = http.createServer(app);
+const io = socketIO(server, {
+  cors: {
+    origin: '*',
+  },
+});
 
 mongoose.connect(process.env.MONGODB_URI, {
   useNewUrlParser: true,
   useUnifiedTopology: true,
 });
-
 app.use(express.json());
 app.use(cors());
 
+
+io.on('connection', (socket) => {
+  console.log('Usuario conectado');
+
+  // Maneja eventos aquí (iniciar y finalizar viajes)
+  socket.on('iniciarViaje', (data) => {
+    // Lógica para iniciar el viaje
+    console.log('Viaje iniciado:', data.viajeId);
+
+    // Emitir un evento a todos los clientes para informar sobre el inicio del viaje
+    io.emit('viajeIniciado', { mensaje: '¡Viaje en curso!', viajeId: data.viajeId });
+  });
+
+  socket.on('finalizarViaje', (data) => {
+    // Lógica para finalizar el viaje
+    console.log('Viaje finalizado:', data.viajeId);
+
+    // Emitir un evento a todos los clientes para informar sobre la finalización del viaje
+    io.emit('viajeFinalizado', { mensaje: '¡Viaje finalizado!', viajeId: data.viajeId });
+  });
+
+  socket.on('disconnect', () => {
+    console.log('Usuario desconectado');
+  });
+});
 
 
 // Middleware JWT para autenticación
@@ -51,7 +82,6 @@ app.use((req, res, next) => {
     }
   }
 
-  // Continúa con la ejecución del siguiente middleware
   next();
 });
 
@@ -306,15 +336,20 @@ app.post('/viajes/:id/finalizar', async (req, res) => {
     if (!viaje) {
       return res.status(404).json({ error: 'Viaje no encontrado' });
     }
+
     // Eliminar el viaje de la base de datos
     await Viaje.findByIdAndDelete(viajeId);
 
+    // Emitir un evento 'viajeFinalizado' con el ID del viaje
+    io.emit('viajeFinalizado', { viajeId });
+
     res.status(200).json({ mensaje: 'Viaje finalizado exitosamente' });
   } catch (error) {
-    console.error(error); // Agrega esta línea para imprimir el error en la consola
+    console.error(error);
     res.status(500).json({ error: 'Error al finalizar el viaje' });
   }
 });
+
 app.get('/', (req, res) => {
   console.log(__dirname);
   res.sendFile(__dirname + '/index.html');
@@ -322,6 +357,6 @@ app.get('/', (req, res) => {
 
 
 
-app.listen(port, () => {
+server.listen(port, () => {
   console.log('Arrancando La Aplicación en el puerto ' + port);
 });
